@@ -1,6 +1,19 @@
 # Plataforma Consultoria
 
-Plataforma interna para consultorias de SST e gestão ambiental, com cadastro de empresas, projetos, modelos de avaliação, gap analysis, documentos e agentes de IA.
+SaaS para consultorias de Segurança do Trabalho (SST) e gestão ambiental automatizarem a produção de documentos técnicos (PGR, PCMSO, políticas, procedimentos) usando agentes de IA, com controle de empresas, projetos e conformidade legal.
+
+## Funcionalidades
+
+- **Gestão de empresas e projetos**: cadastro multi-empresa com histórico de projetos de consultoria.
+- **Agentes de IA para documentos**: geração automática de PGR, PCMSO, PGRS, políticas (ambiental, SST, canal de denúncia), procedimentos (APR, auditoria interna, controle operacional ambiental) e matrizes (riscos, aspectos/impactos, treinamentos, requisitos legais).
+- **Gap analysis e perfil operacional**: agentes que avaliam a empresa e apontam lacunas de conformidade antes de gerar os documentos.
+- **Validador de fidelidade legal**: confere se o conteúdo gerado pela IA está alinhado às leis canônicas aplicáveis, com regeneração automática quando encontra divergência.
+- **Exportação em PDF**: geração de documentos finais com capa, sumário e formatação pronta para entrega ao cliente.
+- **Auto-revisão e chain-of-thought**: agentes revisam e corrigem a própria saída antes de entregar o documento.
+
+## Stack
+
+Next.js (App Router) · TypeScript · Prisma + PostgreSQL · NextAuth · OpenAI · Tailwind CSS
 
 ## Requisitos
 
