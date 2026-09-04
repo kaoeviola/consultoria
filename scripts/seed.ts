@@ -3,6 +3,27 @@ import { PrismaClient } from '@prisma/client'
 const prisma = new PrismaClient()
 
 async function main() {
+  await prisma.configuracaoConsultoria.upsert({
+    where: { id: 'seed-consultoria-sgi' },
+    update: {
+      nome: 'Consultoria SGI',
+      nomeConsultoria: 'Consultoria SGI',
+      nomeCompleto: 'Consultoria em Sistemas de Gestão Integrada',
+      slogan: 'ISO 14001 · ISO 45001 · SST · ESG',
+      responsavelTecnico: 'A SER PREENCHIDO PELA CONSULTORIA',
+      registroResponsavel: 'A SER PREENCHIDO PELA CONSULTORIA',
+    },
+    create: {
+      id: 'seed-consultoria-sgi',
+      nome: 'Consultoria SGI',
+      nomeConsultoria: 'Consultoria SGI',
+      nomeCompleto: 'Consultoria em Sistemas de Gestão Integrada',
+      slogan: 'ISO 14001 · ISO 45001 · SST · ESG',
+      responsavelTecnico: 'A SER PREENCHIDO PELA CONSULTORIA',
+      registroResponsavel: 'A SER PREENCHIDO PELA CONSULTORIA',
+    },
+  })
+
   const empresa = await prisma.empresa.upsert({
     where: { id: 'seed-metalurgica-sao-paulo' },
     update: {

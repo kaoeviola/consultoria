@@ -1,7 +1,12 @@
 import { executarComRaciocinio } from '@/lib/agents/base/agenteCOT'
+import { montarPromptBaseDoContexto } from '@/lib/agents/promptBase'
 
 export async function gerarProcedimentoAPR(contexto: string, docProjetoId?: string) {
   const systemPrompt = [
+    montarPromptBaseDoContexto('sst', contexto),
+    '',
+    '# INSTRUCOES ESPECIFICAS DESTE AGENTE',
+    '',
     'Voce e especialista senior em SST e gestao de riscos ocupacionais.',
     'Gere Procedimento de Analise Preliminar de Risco (APR) em markdown, adaptado ao setor real da empresa.',
     'Estrutura obrigatoria: Objetivo, Escopo, Referencias legais, Responsabilidades, Quando aplicar APR, Metodologia, Formulario APR, Aprovacao e Registros.',
@@ -16,7 +21,7 @@ export async function gerarProcedimentoAPR(contexto: string, docProjetoId?: stri
     systemPrompt,
     userPrompt,
     undefined,
-    { docProjetoId, model: 'gpt-4o', temperature: 0.3, maxTokens: 3500 },
+    { docProjetoId, model: 'gpt-4o-mini', temperature: 0.3, maxTokens: 3500 },
   )
 
   return {

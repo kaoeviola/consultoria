@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Sparkles, Trash2, UploadCloud } from 'lucide-react'
+import { detectarCodigoDocumento } from '@/lib/documentos/codigo'
 import { exportarPDF, exportarWord, type DocumentoExport } from '@/lib/exportar'
 import { PreviewDocumento } from '@/components/projeto/PreviewDocumento'
 import {
@@ -42,6 +43,7 @@ type DocumentoHub = {
     versao: number
     createdAt: string
   }[]
+  validacoesFidelidade?: ValidacaoFidelidade[]
 }
 
 type ProjetoHub = {
@@ -81,6 +83,29 @@ type Revisao = {
   alertas_legais: string[]
 }
 
+type DivergenciaFidelidade = {
+  severidade: 'critica' | 'alta' | 'media' | 'info'
+  regra: string
+  esperado: string | string[]
+  encontrado: string | string[]
+  mensagem: string
+  localizacao?: string
+}
+
+type ValidacaoFidelidade = {
+  id?: string
+  versao: number
+  score: number
+  divergencias: DivergenciaFidelidade[]
+  criticas?: number
+  altas?: number
+  medias?: number
+  infos?: number
+  contagem?: { criticas: number; altas: number; medias: number; infos: number }
+  bloqueia: boolean
+  executadoEm: string
+}
+
 export function DocumentosHub({ projeto }: { projeto: ProjetoHub }) {
   const router = useRouter()
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -88,6 +113,7 @@ export function DocumentosHub({ projeto }: { projeto: ProjetoHub }) {
   const [preview, setPreview] = useState<DocumentoHub | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<DocumentoHub | null>(null)
   const [reviews, setReviews] = useState<Record<string, Revisao>>({})
+  const [fidelidade, setFidelidade] = useState<Record<string, ValidacaoFidelidade>>({})
   const recomendacoes = useMemo(() => buildRecomendacoes(projeto), [projeto])
   const recomendacoesAutonomas = recomendacoes.filter(
     (item) => item.categoriaAutonomia === CATEGORIAS_DOCUMENTO.CONSULTORIA_AUTONOMA,
@@ -251,18 +277,90 @@ export function DocumentosHub({ projeto }: { projeto: ProjetoHub }) {
     })
     if (response.ok) {
       const data = (await response.json()) as Revisao
-      setReviews((current) => ({ ...current, [documentoId]: data }))
+      console.log('typeof audit?.score:', typeof data?.score, data?.score)
+      const revisaoNormalizada = {
+        ...data,
+        score: Number(data?.score ?? 0),
+      }
+      setReviews((current) => ({ ...current, [documentoId]: revisaoNormalizada }))
     }
     setBusyId(null)
   }
 
+  async function validarFidelidadeDocumento(documentoId: string) {
+    setBusyId(`fidelidade-${documentoId}`)
+    setMessage('Validando fidelidade factual contra anamnese e perfil operacional...')
+    const response = await fetch('/api/agentes/validar-fidelidade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ docProjetoId: documentoId }),
+    })
+    const data = await response.json().catch(() => null)
+    if (!response.ok) {
+      console.error('Erro completo:', data)
+      alert(`Erro: ${data?.error || data?.message || JSON.stringify(data).substring(0, 200)}`)
+      setMessage('')
+      setBusyId(null)
+      return
+    }
+
+    setFidelidade((current) => ({ ...current, [documentoId]: data as ValidacaoFidelidade }))
+    setMessage('Validação de fidelidade concluída.')
+    setBusyId(null)
+    router.refresh()
+  }
+
+  async function approveDocument(documento: DocumentoHub, force = false) {
+    const validacao = latestFidelidade(documento, fidelidade)
+    const bloqueia = Boolean(validacao?.bloqueia)
+    let justificativa: string | null = null
+
+    if (bloqueia && !force) {
+      alert('Resolva divergências críticas antes de aprovar.')
+      return
+    }
+
+    if (force) {
+      justificativa = window.prompt('Justifique a aprovação manual apesar das divergências críticas:')
+      if (!justificativa?.trim()) return
+    }
+
+    setBusyId(`aprovar-${documento.id}`)
+    const response = await fetch(`/api/documentos/${documento.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status: 'aprovado',
+        ...(justificativa ? { aprovadoOverrideJustificativa: justificativa } : {}),
+      }),
+    })
+    const data = await response.json().catch(() => null)
+    if (!response.ok) {
+      console.error('Erro completo:', data)
+      alert(`Erro: ${data?.error || data?.message || JSON.stringify(data).substring(0, 200)}`)
+      setBusyId(null)
+      return
+    }
+
+    setBusyId(null)
+    router.refresh()
+  }
+
   async function regenerateFixing(documentoId: string, problemas: unknown[]) {
+    const audit = reviews[documentoId]
+    console.log('typeof audit?.score antes do submit:', typeof audit?.score, audit?.score)
+    const body = {
+      docProjetoId: documentoId,
+      problemas,
+      score: Number(audit?.score ?? 0),
+    }
+
     setBusyId(`regen-${documentoId}`)
     setMessage('Regenerando documento corrigindo problemas de auditoria...')
     const response = await fetch('/api/agentes/regenerar-corrigindo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ docProjetoId: documentoId, problemas }),
+      body: JSON.stringify(body),
     })
     const data = await response.json().catch(() => null)
     if (!response.ok) {
@@ -425,11 +523,27 @@ export function DocumentosHub({ projeto }: { projeto: ProjetoHub }) {
             <CardHeader title={documento.nome} subtitle="Gerado por IA — revisar" badge={`Score ${documento.scoreQualidade ?? '-'}/100`} />
             <PreviewText text={documento.conteudo || ''} onMore={() => setPreview(documento)} />
             {reviews[documento.id] ? <ReviewSummary review={reviews[documento.id]} /> : null}
+            <FidelidadePanel validacao={latestFidelidade(documento, fidelidade)} />
             <div className="mt-4 flex flex-wrap gap-2">
               <Action onClick={() => setPreview(documento)}>Visualizar completo</Action>
-              <Action variant="secondary" onClick={() => updateStatus(documento.id, 'aprovado')}>Aprovar</Action>
+              <Action
+                variant="secondary"
+                onClick={() => approveDocument(documento)}
+                disabled={Boolean(latestFidelidade(documento, fidelidade)?.bloqueia)}
+                title={latestFidelidade(documento, fidelidade)?.bloqueia ? 'Resolva divergências críticas antes de aprovar' : undefined}
+              >
+                Aprovar
+              </Action>
+              {latestFidelidade(documento, fidelidade)?.bloqueia ? (
+                <Action variant="secondary" onClick={() => approveDocument(documento, true)}>
+                  Aprovar mesmo assim (justificar)
+                </Action>
+              ) : null}
               <Action variant="secondary" onClick={() => regenerate(documento.id)}>Regenerar</Action>
               <Action variant="secondary" onClick={() => review(documento.id)} disabled={busyId === `review-${documento.id}`}>Revisar com IA</Action>
+              <Action variant="secondary" onClick={() => validarFidelidadeDocumento(documento.id)} disabled={busyId === `fidelidade-${documento.id}`}>
+                {busyId === `fidelidade-${documento.id}` ? <LoadingLabel label="Validando..." /> : 'Validar Fidelidade'}
+              </Action>
             </div>
           </Card>
         ))}
@@ -441,8 +555,8 @@ export function DocumentosHub({ projeto }: { projeto: ProjetoHub }) {
             <CardTools documento={documento} onDelete={() => setDeleteTarget(documento)} />
             <CardHeader title={documento.nome} subtitle={`Versão ${documento.versao} · aprovado por ${documento.aprovadoPor || 'humano'} · ${new Date(documento.updatedAt).toLocaleDateString('pt-BR')}`} badge="Aprovado" />
             <div className="mt-4 flex flex-wrap gap-2">
-              <Action onClick={() => exportarPDF(toExport(documento), projeto.empresa)}>Exportar PDF</Action>
-              <Action variant="secondary" onClick={() => exportarWord(toExport(documento), projeto.empresa)}>Exportar Word</Action>
+              <Action onClick={() => exportarPDF(toExport(documento, projeto.documentos), projeto.empresa)}>Exportar PDF</Action>
+              <Action variant="secondary" onClick={() => exportarWord(toExport(documento, projeto.documentos), projeto.empresa)}>Exportar Word</Action>
               <Action variant="secondary" onClick={() => setPreview(documento)}>Histórico de versões</Action>
             </div>
           </Card>
@@ -637,17 +751,20 @@ function Action({
   children,
   onClick,
   disabled,
+  title,
   variant = 'primary',
 }: {
   children: React.ReactNode
   onClick: () => void
   disabled?: boolean
+  title?: string
   variant?: 'primary' | 'secondary'
 }) {
   return (
     <button
       type="button"
       disabled={disabled}
+      title={title}
       onClick={onClick}
       className={
         variant === 'primary'
@@ -673,6 +790,61 @@ function ReviewSummary({ review }: { review: Revisao }) {
   return (
     <div className="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-800">
       Score revisão: {review.score}/100 · {review.aprovado ? 'Aprovável' : 'Revisar antes de aprovar'}
+    </div>
+  )
+}
+
+function FidelidadePanel({ validacao }: { validacao: ValidacaoFidelidade | null }) {
+  if (!validacao) {
+    return (
+      <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+        Fidelidade factual ainda não validada.
+      </div>
+    )
+  }
+
+  const grupos = (['critica', 'alta', 'media', 'info'] as const)
+    .map((severidade) => ({
+      severidade,
+      itens: validacao.divergencias.filter((item) => item.severidade === severidade),
+    }))
+    .filter((grupo) => grupo.itens.length)
+
+  return (
+    <div className={`mt-3 rounded-md border p-3 text-sm ${scoreTone(validacao.score)}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-semibold">Validação de Fidelidade: {validacao.score}/100</p>
+        <span className="rounded-full bg-white/70 px-2 py-1 text-xs font-medium">
+          {validacao.bloqueia ? 'Bloqueia aprovação' : 'Sem bloqueio crítico'}
+        </span>
+      </div>
+      <p className="mt-1 text-xs opacity-80">
+        v{validacao.versao} · {new Date(validacao.executadoEm).toLocaleString('pt-BR')}
+      </p>
+
+      {grupos.length ? (
+        <div className="mt-3 space-y-3">
+          {grupos.map((grupo) => (
+            <div key={grupo.severidade}>
+              <p className="text-xs font-bold uppercase">{grupo.severidade}</p>
+              <ul className="mt-1 space-y-2">
+                {grupo.itens.map((item, index) => (
+                  <li key={`${item.regra}-${index}`} className="rounded bg-white/70 p-2">
+                    <p className="break-words font-medium">{item.regra}</p>
+                    <p className="break-words">{item.mensagem}</p>
+                    <p className="mt-1 break-words text-xs">
+                      Esperado: {formatValue(item.esperado)} · Encontrado: {formatValue(item.encontrado)}
+                    </p>
+                    {item.localizacao ? <p className="break-words text-xs">Localização: {item.localizacao}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-2">Nenhuma divergência factual encontrada.</p>
+      )}
     </div>
   )
 }
@@ -781,15 +953,61 @@ function ConfirmDeleteModal({
   )
 }
 
-function toExport(documento: DocumentoHub): DocumentoExport {
+function toExport(documento: DocumentoHub, documentos: DocumentoHub[] = [documento]): DocumentoExport {
   return {
     id: documento.id,
     nome: documento.nome,
     tipo: documento.tipo,
     status: documento.status,
     versao: documento.versao,
+    sequencial: getSequencialDocumento(documento, documentos),
+    tabelaLargura: isMatrizAspectos(documento) ? 'manter-linha' : 'pode-dividir',
     conteudo: documento.conteudo || '',
   }
+}
+
+function isMatrizAspectos(documento: DocumentoHub) {
+  const text = `${documento.nome} ${documento.tipo}`
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+
+  return text.includes('matriz') && text.includes('aspectos') && text.includes('impactos')
+}
+
+function getSequencialDocumento(documento: DocumentoHub, documentos: DocumentoHub[]) {
+  const prefix = detectarCodigoDocumento(documento.nome, documento.tipo, 1).replace(/-\d{3}$/, '')
+  const ordenados = documentos
+    .filter((item) => safeCodigoDocumento(item)?.startsWith(prefix))
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+
+  return Math.max(1, ordenados.findIndex((item) => item.id === documento.id) + 1)
+}
+
+function safeCodigoDocumento(documento: DocumentoHub) {
+  try {
+    return detectarCodigoDocumento(documento.nome, documento.tipo, 1)
+  } catch {
+    return null
+  }
+}
+
+function latestFidelidade(
+  documento: DocumentoHub,
+  overrides: Record<string, ValidacaoFidelidade>,
+): ValidacaoFidelidade | null {
+  return overrides[documento.id] || documento.validacoesFidelidade?.[0] || null
+}
+
+function scoreTone(score: number) {
+  if (score >= 85) return 'border-green-200 bg-green-50 text-green-800'
+  if (score >= 70) return 'border-yellow-200 bg-yellow-50 text-yellow-800'
+  if (score >= 50) return 'border-orange-200 bg-orange-50 text-orange-800'
+  return 'border-red-200 bg-red-50 text-red-800'
+}
+
+function formatValue(value: string | string[]) {
+  return Array.isArray(value) ? value.join(', ') : value
 }
 
 function byStatus(documentos: DocumentoHub[], status: string) {

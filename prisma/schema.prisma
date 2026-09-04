@@ -111,6 +111,7 @@ model PadraoDocumento {
 model ConfiguracaoConsultoria {
   id                  String   @id @default(cuid())
   nome                String   @default("Consultoria SGI")
+  nomeConsultoria     String   @default("Consultoria SGI")
   nomeCompleto        String?
   slogan              String?
   corPrimaria         String   @default("#1a56db")
@@ -118,6 +119,8 @@ model ConfiguracaoConsultoria {
   logoUrl             String?
   responsavelNome     String?
   responsavelRegistro String?
+  responsavelTecnico  String?
+  registroResponsavel String?
   responsavelCargo    String?
   endereco            String?
   telefone            String?
@@ -239,8 +242,26 @@ model DocProjeto {
   aprovadoPor String?
   exportacoes Exportacao[]
   versoes     VersaoDocumento[]
+  validacoesFidelidade ValidacaoFidelidade[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+model ValidacaoFidelidade {
+  id            String     @id @default(cuid())
+  docProjetoId  String
+  docProjeto    DocProjeto @relation(fields: [docProjetoId], references: [id], onDelete: Cascade)
+  versao        Int
+  score         Int
+  divergencias  Json
+  criticas      Int        @default(0)
+  altas         Int        @default(0)
+  medias        Int        @default(0)
+  infos         Int        @default(0)
+  bloqueia      Boolean    @default(false)
+  executadoEm   DateTime   @default(now())
+
+  @@index([docProjetoId, versao])
 }
 
 model Exportacao {
@@ -261,5 +282,7 @@ model VersaoDocumento {
   docProjeto    DocProjeto @relation(fields: [docProjetoId], references: [id], onDelete: Cascade)
   versao        Int
   conteudo      String     @db.Text
+  alteracoes    String?
+  autor         String?
   createdAt     DateTime   @default(now())
 }

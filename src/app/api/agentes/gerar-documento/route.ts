@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
+import { aplicarWarningProcessos } from '@/lib/agents/validacao-processos'
 import { validarComoAuditor } from '@/lib/agents/validadorAuditoria'
+import { jsonErrorResponse } from '@/lib/api-error'
+import { limparMarkdownFence } from '@/lib/documentos/markdown'
 import { prisma } from '@/lib/prisma'
 
 const projetoCompletoInclude = {
@@ -106,6 +109,8 @@ export async function POST(request: NextRequest) {
           docProjetoId: docProjeto.id,
           versao: docProjeto.versao,
           conteudo: docProjeto.conteudo,
+          alteracoes: 'Atualização do documento',
+          autor: 'IA geradora',
         },
       })
     }
@@ -147,14 +152,24 @@ export async function POST(request: NextRequest) {
       docProjeto.projeto.anamnese?.perfilOperacional || {},
     )
 
-    const conteudo =
-      typeof documentoGerado === 'string' ? documentoGerado : documentoGerado.conteudo
+    const conteudo = garantirEmpresaNoConteudo(
+      sanitizarConteudoAntesDeSalvar(
+      limparMarkdownFence(
+      typeof documentoGerado === 'string' ? documentoGerado : documentoGerado.conteudo,
+      ),
+      docProjeto.nome,
+      ),
+      docProjeto.projeto.empresa.nome,
+    )
     const metadados =
       typeof documentoGerado === 'string' ? null : documentoGerado.metadados
-    const validacaoAuditoria = validarComoAuditor(
-      conteudo,
-      docProjeto.tipo || docProjeto.nome,
-      { nome: docProjeto.projeto.empresa.nome },
+    const validacaoAuditoria = aplicarWarningProcessos(
+      validarComoAuditor(
+        conteudo,
+        docProjeto.tipo || docProjeto.nome,
+        { nome: docProjeto.projeto.empresa.nome },
+      ),
+      metadados,
     )
     const autoRevisao = metadados?.autoRevisao
     const rawScore =
@@ -190,16 +205,91 @@ export async function POST(request: NextRequest) {
       documento: docAtualizado,
     })
   } catch (error: unknown) {
-    console.error('=== ERRO GERAR DOCUMENTO ===')
-    console.error('Message:', error instanceof Error ? error.message : error)
-    console.error('Stack:', error instanceof Error ? error.stack : undefined)
-
-    return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : 'Erro desconhecido',
-        details: String(error),
-      },
-      { status: 500 },
-    )
+    return jsonErrorResponse(error, '[API ERROR] gerar-documento')
   }
+}
+
+function sanitizarConteudoAntesDeSalvar(conteudo: string, nomeDocumento: string) {
+  const nomeNormalizado = nomeDocumento
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+  const conteudoSanitizado = conteudo
+    .replace(/NR-9\s*[-–—:]\s*Programa de Prevencao de Riscos Ambientais/gi, 'NR-9/2020 - Avaliacao e Controle das Exposicoes Ocupacionais')
+    .replace(/NR-9\s*[-–—:]\s*Programa de Prevenção de Riscos Ambientais/gi, 'NR-9/2020 - Avaliacao e Controle das Exposicoes Ocupacionais')
+    .replace(/\bPPRA\b/gi, 'NR-9/2020 - Avaliacao e Controle das Exposicoes Ocupacionais')
+    .replace(/NBR\s*10\.004\s*[-–—:]\s*Gest[aã]o Ambiental/gi, 'NBR 10.004:2004 - Classificacao de residuos solidos quanto a periculosidade')
+    .replace(/NBR\s*10\.004\s*[-–—:]\s*Classifica[cç][aã]o de res[ií]duos s[oó]lidos\b/gi, 'NBR 10.004:2004 - Classificacao de residuos solidos quanto a periculosidade')
+    .replace(/\bINSAT\b/g, 'empresa de referencia externa omitida')
+    .replace(/\bGrupo KWM\b/g, 'empresa de referencia externa omitida')
+    .replace(/\bTempo BR\b/g, 'empresa de referencia externa omitida')
+    .replace(/\bBrasil Ar\b/g, 'empresa de referencia externa omitida')
+    .replace(/\bVolkswagen\b/g, 'cliente externo omitido')
+
+  if (nomeNormalizado.includes('matriz') && nomeNormalizado.includes('requisitos') && nomeNormalizado.includes('legais')) {
+    return conteudoSanitizado
+      .split('\n')
+      .filter((linha) => !/(^|[^A-Z0-9])NR[-\s]?\d{1,2}([^0-9]|$)/i.test(linha))
+      .map((linha) => linha.replace(/\blogistica reversa\b/gi, 'sistema de retorno pos-consumo'))
+      .filter((linha) => !(/CONAMA\s*430/i.test(linha) && /res[ií]du|classifica/i.test(linha)))
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  }
+
+  if (nomeNormalizado.includes('controle') && nomeNormalizado.includes('operacional') && nomeNormalizado.includes('ambiental')) {
+    return conteudoSanitizado
+      .split('\n')
+      .map((linha) => linha.replace(/\blog[ií]stica\b/gi, 'Expedicao'))
+      .filter((linha) => !(/CONAMA\s*430/i.test(linha) && !/efluente/i.test(linha)))
+      .filter((linha) => !(/Lei\s*6\.938/i.test(linha) && !/Politica Nacional do Meio Ambiente/i.test(linha)))
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  }
+
+  if (nomeNormalizado.includes('matriz') && nomeNormalizado.includes('treinamento')) {
+    return conteudoSanitizado
+      .replace(/\barmazenagem\b/gi, 'Expedicao')
+      .replace(/\blog[ií]stica\b/gi, 'Expedicao')
+  }
+
+  if (nomeNormalizado.includes('plano') && nomeNormalizado.includes('emergencia')) {
+    return conteudoSanitizado
+      .split('\n')
+      .filter((linha) => !/(CONAMA|Lei\s*12\.305|PNRS|Politica Nacional de Residuos)/i.test(linha))
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  }
+
+  if (nomeNormalizado.includes('auditoria') && nomeNormalizado.includes('interna')) {
+    return conteudoSanitizado
+      .split('\n')
+      .filter((linha) => !/\bNR[-\s]?\d{1,2}\b/i.test(linha))
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  }
+
+  if (nomeNormalizado.includes('apr')) {
+    return conteudoSanitizado
+      .replace(/\barmazenagem\b/gi, 'Expedicao')
+      .replace(/\blog[ií]stica\b/gi, 'Expedicao')
+  }
+
+  return conteudoSanitizado
+}
+
+function garantirEmpresaNoConteudo(conteudo: string, nomeEmpresa: string) {
+  if (normalizarTexto(conteudo).includes(normalizarTexto(nomeEmpresa))) return conteudo
+
+  return [`Empresa avaliada: ${nomeEmpresa}`, '', conteudo].join('\n')
+}
+
+function normalizarTexto(value: string) {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
 }

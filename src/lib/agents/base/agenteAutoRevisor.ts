@@ -7,7 +7,7 @@ const itemTextoSchema = z.union([
 ])
 
 const avaliacaoSchema = z.object({
-  score: z.number().min(0).max(100),
+  score: z.coerce.number().min(0).max(100),
   problemas: z.array(itemTextoSchema).default([]),
   melhorias: z.array(itemTextoSchema).default([]),
 })

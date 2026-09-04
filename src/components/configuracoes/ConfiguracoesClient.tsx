@@ -3,8 +3,11 @@
 import { useMemo, useState } from 'react'
 import { CONSULTORIA_CONFIG } from '@/lib/config/consultoria'
 
+const PLACEHOLDER_RESPONSAVEL = 'A SER PREENCHIDO PELA CONSULTORIA'
+
 type Configuracao = {
   nome: string
+  nomeConsultoria: string | null
   nomeCompleto: string | null
   slogan: string | null
   corPrimaria: string
@@ -12,6 +15,8 @@ type Configuracao = {
   logoUrl: string | null
   responsavelNome: string | null
   responsavelRegistro: string | null
+  responsavelTecnico: string | null
+  registroResponsavel: string | null
   responsavelCargo: string | null
   endereco: string | null
   telefone: string | null
@@ -25,6 +30,8 @@ export function ConfiguracoesClient({ initialConfig }: { initialConfig: Configur
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const temResponsavelPendente =
+    isPlaceholder(config.responsavelTecnico) || isPlaceholder(config.registroResponsavel)
   const initials = useMemo(
     () =>
       config.nome
@@ -83,8 +90,15 @@ export function ConfiguracoesClient({ initialConfig }: { initialConfig: Configur
           <h1 className="mt-2 text-2xl font-semibold text-slate-950">Configurações</h1>
         </div>
 
+        {temResponsavelPendente ? (
+          <div className="mt-5 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Preencha o responsável técnico e o registro profissional antes de exportar documentos para clientes.
+          </div>
+        ) : null}
+
         <div className="mt-6 grid gap-5 sm:grid-cols-2">
           <Field label="Nome da consultoria" value={config.nome} onChange={(value) => update('nome', value)} />
+          <Field label="Nome curto/assinatura" value={config.nomeConsultoria || ''} onChange={(value) => update('nomeConsultoria', value)} />
           <Field label="Nome completo" value={config.nomeCompleto || ''} onChange={(value) => update('nomeCompleto', value)} />
           <Field label="Slogan" value={config.slogan || ''} onChange={(value) => update('slogan', value)} />
           <Field label="Cor primária" type="color" value={config.corPrimaria} onChange={(value) => update('corPrimaria', value)} />
@@ -102,8 +116,8 @@ export function ConfiguracoesClient({ initialConfig }: { initialConfig: Configur
 
         <SectionTitle title="Responsável técnico padrão" />
         <div className="grid gap-5 sm:grid-cols-3">
-          <Field label="Nome" value={config.responsavelNome || ''} onChange={(value) => update('responsavelNome', value)} />
-          <Field label="CREA/CRQ/Registro" value={config.responsavelRegistro || ''} onChange={(value) => update('responsavelRegistro', value)} />
+          <Field label="Responsável técnico" value={config.responsavelTecnico || ''} onChange={(value) => update('responsavelTecnico', value)} />
+          <Field label="CREA/CRQ/Registro" value={config.registroResponsavel || ''} onChange={(value) => update('registroResponsavel', value)} />
           <Field label="Cargo" value={config.responsavelCargo || ''} onChange={(value) => update('responsavelCargo', value)} />
         </div>
 
@@ -189,4 +203,8 @@ function Field({
       />
     </div>
   )
+}
+
+function isPlaceholder(value?: string | null) {
+  return !value || value.trim().toUpperCase() === PLACEHOLDER_RESPONSAVEL
 }

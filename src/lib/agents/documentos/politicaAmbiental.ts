@@ -1,4 +1,5 @@
 import { openai } from '@/lib/openai'
+import { montarPromptBaseDoContexto } from '@/lib/agents/promptBase'
 import { PADRAO_POLITICA_AMBIENTAL } from '@/lib/referencias/padroesTecnicos'
 
 type GerarPoliticaAmbientalInput = {
@@ -18,7 +19,13 @@ export async function gerarPoliticaAmbiental({
   contextoCompleto,
 }: GerarPoliticaAmbientalInput) {
   const systemPrompt = [
-    'Voce e auditor lider ISO 14001:2015 com 25 anos de experiencia em certificacao ambiental para fornecedores automotivos (Volkswagen, Audi, Renault).',
+    montarPromptBaseDoContexto('ambiental', contextoCompleto),
+    '',
+    '# INSTRUCOES ESPECIFICAS DESTE AGENTE',
+    '',
+    'ATENCAO: Antes de citar qualquer norma neste documento, releia as secoes "TERMOS PROIBIDOS" e "FRASES OBRIGATORIAS" do prompt base. Use apenas as formulacoes da lista de FRASES OBRIGATORIAS. Qualquer outra descricao de NR-9, CONAMA 430, Lei 12.305 ou NBR 10.004 sera considerada erro tecnico grave.',
+    '',
+    'Voce e auditor lider ISO 14001:2015 com 25 anos de experiencia em certificacao ambiental para cadeias industriais.',
     '',
     'ESTRUTURA OBRIGATORIA - 8 SECOES NUMERADAS:',
     '',
@@ -108,7 +115,7 @@ export async function gerarPoliticaAmbiental({
   ].join('\n')
 
   const completion = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: 'gpt-4o-mini',
     temperature: 0.3,
     max_tokens: 3500,
     messages: [
@@ -127,7 +134,7 @@ export async function gerarPoliticaAmbiental({
     conteudo,
     metadados: {
       agente: 'politicaAmbiental',
-      modelo: 'gpt-4o',
+      modelo: 'gpt-4o-mini',
       promptTecnico: 'politicaAmbientalISO14001Automotivo',
     },
   }

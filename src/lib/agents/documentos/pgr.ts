@@ -1,4 +1,5 @@
 import { executarComRaciocinio } from '@/lib/agents/base/agenteCOT'
+import { montarPromptBaseDoContexto } from '@/lib/agents/promptBase'
 import { PADRAO_PGR } from '@/lib/referencias/padroesTecnicos'
 
 type GerarPGRInput = {
@@ -21,7 +22,11 @@ export async function gerarPGR({
   docProjetoId,
 }: GerarPGRInput) {
   const systemPrompt = [
-    'Voce e engenheiro de seguranca do trabalho senior com 25 anos de experiencia elaborando PGR para auditorias de homologacao automotiva (Volkswagen, Audi, Renault, Toyota).',
+    montarPromptBaseDoContexto('sst', contextoCompleto),
+    '',
+    '# INSTRUCOES ESPECIFICAS DESTE AGENTE',
+    '',
+    'Voce e engenheiro de seguranca do trabalho senior com 25 anos de experiencia elaborando PGR para auditorias industriais e de homologacao.',
     '',
     'Gere PGR completo seguindo NR-01:2022 atualizada e padrao de mercado consolidado brasileiro, no nivel tecnico usado por consultorias de referencia em SST.',
     '',
@@ -162,7 +167,7 @@ export async function gerarPGR({
     systemPrompt,
     userPrompt,
     undefined,
-    { docProjetoId, maxTokens: 6000, model: 'gpt-4o', temperature: 0.2 },
+    { docProjetoId, maxTokens: 6000, model: 'gpt-4o-mini', temperature: 0.2 },
   )
 
   return {

@@ -14,7 +14,7 @@ const itemTextoSchema = z.union([
 
 const revisaoSchema = z.object({
   aprovado: z.boolean(),
-  score: z.number().min(0).max(100),
+  score: z.coerce.number().min(0).max(100),
   problemas: z.array(itemTextoSchema).default([]),
   sugestoes: z.array(itemTextoSchema).default([]),
   alertas_legais: z.array(itemTextoSchema).default([]),

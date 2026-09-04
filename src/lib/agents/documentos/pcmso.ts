@@ -1,4 +1,5 @@
 import { executarComRaciocinio } from '@/lib/agents/base/agenteCOT'
+import { montarPromptBaseDoContexto } from '@/lib/agents/promptBase'
 import { PADRAO_PCMSO } from '@/lib/referencias/padroesTecnicos'
 
 type GerarPCMSOInput = {
@@ -19,6 +20,10 @@ export async function gerarPCMSO({
   docProjetoId,
 }: GerarPCMSOInput) {
   const systemPrompt = [
+    montarPromptBaseDoContexto('sst', contextoCompleto),
+    '',
+    '# INSTRUCOES ESPECIFICAS DESTE AGENTE',
+    '',
     'Voce e medico do trabalho senior elaborando PCMSO conforme NR-07 atualizada pela Portaria 6.734/2020. O PCMSO deve estar perfeitamente alinhado ao PGR da empresa.',
     '',
     'REGRAS ABSOLUTAS:',

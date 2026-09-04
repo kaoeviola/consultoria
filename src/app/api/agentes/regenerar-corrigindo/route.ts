@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { gerarDocumento } from '@/lib/agents/geradorDocumentos'
+import { aplicarWarningProcessos } from '@/lib/agents/validacao-processos'
 import { validarComoAuditor } from '@/lib/agents/validadorAuditoria'
+import { jsonErrorResponse } from '@/lib/api-error'
+import { limparMarkdownFence } from '@/lib/documentos/markdown'
 import { prisma } from '@/lib/prisma'
 
 export async function POST(request: NextRequest) {
@@ -9,6 +12,15 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const docProjetoId = String(body?.docProjetoId || '')
     const problemas: unknown[] = Array.isArray(body?.problemas) ? body.problemas : []
+    const scoreRecebido = Number(body?.score ?? 0)
+    console.log(
+      'Score recebido na regeneracao corretiva:',
+      body?.score,
+      'tipo:',
+      typeof body?.score,
+      'normalizado:',
+      Number.isFinite(scoreRecebido) ? scoreRecebido : null,
+    )
 
     if (!docProjetoId) {
       return NextResponse.json(
@@ -56,6 +68,8 @@ export async function POST(request: NextRequest) {
           docProjetoId: docProjeto.id,
           versao: docProjeto.versao,
           conteudo: docProjeto.conteudo,
+          alteracoes: 'Regeneração corretiva do documento',
+          autor: 'IA revisora',
         },
       })
     }
@@ -112,10 +126,15 @@ export async function POST(request: NextRequest) {
       docProjeto.projeto.anamnese?.perfilOperacional || {},
     )
 
-    const validacaoAuditoria = validarComoAuditor(
-      documentoGerado.conteudo,
-      docProjeto.tipo || docProjeto.nome,
-      { nome: docProjeto.projeto.empresa.nome },
+    const conteudoLimpo = limparMarkdownFence(documentoGerado.conteudo)
+
+    const validacaoAuditoria = aplicarWarningProcessos(
+      validarComoAuditor(
+        conteudoLimpo,
+        docProjeto.tipo || docProjeto.nome,
+        { nome: docProjeto.projeto.empresa.nome },
+      ),
+      documentoGerado.metadados,
     )
     const metadados = {
       ...documentoGerado.metadados,
@@ -138,7 +157,7 @@ export async function POST(request: NextRequest) {
     const atualizado = await prisma.docProjeto.update({
       where: { id: docProjeto.id },
       data: {
-        conteudo: documentoGerado.conteudo,
+        conteudo: conteudoLimpo,
         metadados: JSON.parse(JSON.stringify(metadados)) as Prisma.InputJsonValue,
         scoreQualidade: Number.isFinite(scoreQualidade)
           ? scoreQualidade
@@ -151,10 +170,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, documento: atualizado })
   } catch (error) {
-    console.error('Erro ao regenerar corrigindo:', error)
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Erro desconhecido' },
-      { status: 500 },
-    )
+    return jsonErrorResponse(error, '[API ERROR] regenerar-corrigindo')
   }
 }

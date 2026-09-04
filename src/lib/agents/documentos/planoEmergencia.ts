@@ -1,8 +1,15 @@
 import { executarComRaciocinio } from '@/lib/agents/base/agenteCOT'
 import { gerarComAutoRevisao } from '@/lib/agents/base/agenteAutoRevisor'
+import { montarPromptBaseDoContexto } from '@/lib/agents/promptBase'
 
 export async function gerarPlanoEmergencia(contexto: string, docProjetoId?: string) {
   const systemPrompt = [
+    montarPromptBaseDoContexto('sst', contexto),
+    '',
+    '# INSTRUCOES ESPECIFICAS DESTE AGENTE',
+    '',
+    'ATENCAO: Antes de citar qualquer norma neste documento, releia as secoes "TERMOS PROIBIDOS" e "FRASES OBRIGATORIAS" do prompt base. Use apenas as formulacoes da lista de FRASES OBRIGATORIAS. Qualquer outra descricao de NR-9, CONAMA 430, Lei 12.305 ou NBR 10.004 sera considerada erro tecnico grave.',
+    '',
     'Voce e especialista senior em resposta a emergencias industriais, SST e gestao ambiental.',
     'Gere Plano de Atendimento a Emergencias (PAE) em markdown, especifico para o setor e processos reais da empresa.',
     'Estrutura obrigatoria: Objetivo, Escopo, Referencias, Cenarios de emergencia, Classificacao de emergencia, Sistema de alarme, Brigada, Rotas de fuga, Pontos de encontro, Comunicacao externa, Recursos, Treinamentos, Simulados, Registros e Revisao.',
@@ -20,11 +27,11 @@ export async function gerarPlanoEmergencia(contexto: string, docProjetoId?: stri
 
   const { raciocinio } = await executarComRaciocinio(systemPrompt, userPrompt, undefined, {
     docProjetoId,
-    model: 'gpt-4o',
+    model: 'gpt-4o-mini',
     temperature: 0.3,
     maxTokens: 3500,
   })
-  const revisao = await gerarComAutoRevisao(userPrompt, contexto, [
+  const revisao = await gerarComAutoRevisao([systemPrompt, '', userPrompt].join('\n'), contexto, [
     'Tem cenarios especificos do setor e dos processos?',
     'Tem responsaveis nominais ou papeis claramente definidos?',
     'Tem recursos listados?',

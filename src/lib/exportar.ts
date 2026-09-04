@@ -20,9 +20,21 @@ import {
   WidthType,
 } from 'docx'
 import { CONSULTORIA_CONFIG } from '@/lib/config/consultoria'
+import { detectarCodigoDocumento } from '@/lib/documentos/codigo'
+import { limparConteudoParaExportacao } from '@/lib/documentos/markdown'
+import { gerarPaginaAprovacao } from '@/lib/pdf/aprovacao'
+import { gerarCapa } from '@/lib/pdf/capa'
+import { extrairEstrutura } from '@/lib/pdf/extractor-sumario'
+import { PDF_FONT } from '@/lib/pdf/fontes'
+import { calcularPaginasSumario, gerarSumario, type EntradaSumario } from '@/lib/pdf/sumario'
 
 type EmpresaExport = {
   nome: string
+  cnpj?: string | null
+  cnae?: string | null
+  setor?: string | null
+  cidade?: string | null
+  estado?: string | null
 }
 
 export type DocumentoExport = {
@@ -31,16 +43,28 @@ export type DocumentoExport = {
   tipo: string
   status: string
   versao?: number
+  sequencial?: number
+  tabelaLargura?: 'manter-linha' | 'pode-dividir'
   conteudo: string
+}
+
+type VersaoAprovacao = {
+  numero: number
+  data: Date
+  alteracoes: string
+  autor: string
 }
 
 type ConfigExport = {
   nome: string
+  nomeConsultoria?: string | null
   nomeCompleto?: string | null
   slogan?: string | null
   logoUrl?: string | null
   responsavelNome?: string | null
   responsavelRegistro?: string | null
+  responsavelTecnico?: string | null
+  registroResponsavel?: string | null
   responsavelCargo?: string | null
   endereco?: string | null
   telefone?: string | null
@@ -56,15 +80,63 @@ async function getConfig(): Promise<ConfigExport> {
   } catch {
     return {
       nome: CONSULTORIA_CONFIG.nome,
+      nomeConsultoria: CONSULTORIA_CONFIG.nome,
       nomeCompleto: CONSULTORIA_CONFIG.nomeCompleto,
       slogan: CONSULTORIA_CONFIG.slogan,
+      responsavelTecnico: CONSULTORIA_CONFIG.responsavelTecnico,
+      registroResponsavel: CONSULTORIA_CONFIG.registroResponsavel,
     }
+  }
+}
+
+async function carregarVersoesAprovacao(
+  documento: DocumentoExport,
+  dataExportacao: Date,
+  config: ConfigExport,
+): Promise<VersaoAprovacao[]> {
+  const responsavel = config.responsavelTecnico || config.responsavelNome || 'A SER PREENCHIDO PELA CONSULTORIA'
+  const versaoAtual = documento.versao || 1
+  const atual: VersaoAprovacao = {
+    numero: versaoAtual,
+    data: dataExportacao,
+    alteracoes: versaoAtual > 1 ? 'Atualização do documento' : 'Versão inicial',
+    autor: responsavel,
+  }
+
+  if (!documento.id) return [atual]
+
+  try {
+    const response = await fetch(`/api/documentos/${documento.id}`)
+    if (!response.ok) return [atual]
+
+    const payload = (await response.json()) as {
+      versoes?: Array<{
+        versao: number
+        createdAt: string
+        alteracoes?: string | null
+        autor?: string | null
+      }>
+    }
+    const historico = (payload.versoes || []).map((versao) => ({
+      numero: versao.versao,
+      data: new Date(versao.createdAt),
+      alteracoes: versao.alteracoes || (versao.versao === 1 ? 'Versão inicial' : 'Atualização do documento'),
+      autor: versao.autor || responsavel,
+    }))
+
+    if (!historico.some((versao) => versao.numero === versaoAtual)) {
+      historico.push(atual)
+    }
+
+    return historico.sort((a, b) => a.numero - b.numero)
+  } catch {
+    return [atual]
   }
 }
 
 export async function gerarPreviewHtml(documento: DocumentoExport, _empresa?: EmpresaExport) {
   void _empresa
-  return `<article class="prose prose-slate max-w-none">${escapeHtml(documento.conteudo)}</article>`
+  return `<article class="prose prose-slate max-w-none">${escapeHtml(limparConteudoParaExportacao(documento.conteudo))}</article>`
 }
 
 export async function exportarPDF(documento: DocumentoExport, empresa: EmpresaExport) {
@@ -78,11 +150,41 @@ export async function exportarPDF(documento: DocumentoExport, empresa: EmpresaEx
   const margemEsq = 20
   const margemDir = 20
   const larguraTexto = 210 - margemEsq - margemDir
+  const tabelaLargura = documento.tabelaLargura || detectarTabelaLargura(documento)
+  const codigoDocumento = getCodigoDocumento(documento)
+  const dataExportacao = new Date()
+  const versoesAprovacao = await carregarVersoesAprovacao(documento, dataExportacao, config)
+  const conteudoLimpo = limparConteudoParaExportacao(documento.conteudo)
+  const estrutura = extrairEstrutura(conteudoLimpo)
+  const paginasEstimadas = Math.ceil(conteudoLimpo.split('\n').length / 45)
+  const secoesPrincipais = estrutura.filter((entrada) => entrada.nivel === 2).length
+  const incluirSumario = secoesPrincipais >= 3 || paginasEstimadas >= 3
+  const paginasSumarioReservadas = incluirSumario ? calcularPaginasSumario(estrutura) : 0
+  const entradasSumario: EntradaSumario[] = []
+  let headingIndex = 0
   let y = 20
+  let pendingPortraitAfterWideTable = false
 
-  drawHeader()
+  gerarCapa({
+    doc,
+    configuracao: config,
+    empresa,
+    documento: {
+      nome: documento.nome,
+      tipo: documento.tipo,
+      codigo: codigoDocumento,
+      tipoNome: documento.nome,
+    },
+    versao: { numero: documento.versao || 1, data: dataExportacao },
+  })
 
-  const linhas = documento.conteudo.split('\n')
+  for (let index = 0; index < paginasSumarioReservadas; index += 1) {
+    doc.addPage('a4', 'portrait')
+  }
+
+  addPage('portrait')
+
+  const linhas = conteudoLimpo.split('\n')
   for (let index = 0; index < linhas.length; index += 1) {
     const linha = linhas[index].trim()
 
@@ -93,33 +195,41 @@ export async function exportarPDF(documento: DocumentoExport, empresa: EmpresaEx
         index += 1
       }
       index -= 1
-      drawTable(tableLines)
+      pendingPortraitAfterWideTable = drawTable(tableLines)
       continue
     }
 
-    if (y > 270) addPage()
+    if (pendingPortraitAfterWideTable && linha) {
+      addPage('portrait')
+      pendingPortraitAfterWideTable = false
+    }
+
+    if (y > pageHeight() - 27) addPage()
 
     if (linha.startsWith('# ')) {
+      capturarHeading(linha, 1)
       y += 5
-      doc.setFont('helvetica', 'bold')
+      doc.setFont(PDF_FONT, 'bold')
       doc.setFontSize(18)
       writeWrapped(cleanMarkdown(linha.replace(/^# /, '')), margemEsq, larguraTexto, 8)
       y += 5
     } else if (linha.startsWith('## ')) {
+      capturarHeading(linha, 2)
       y += 4
-      doc.setFont('helvetica', 'bold')
+      doc.setFont(PDF_FONT, 'bold')
       doc.setFontSize(14)
       writeWrapped(cleanMarkdown(linha.replace(/^## /, '')), margemEsq, larguraTexto, 6)
       y += 3
     } else if (linha.startsWith('### ')) {
+      capturarHeading(linha, 3)
       y += 3
-      doc.setFont('helvetica', 'bold')
+      doc.setFont(PDF_FONT, 'bold')
       doc.setFontSize(12)
       writeWrapped(cleanMarkdown(linha.replace(/^### /, '')), margemEsq, larguraTexto, 6)
     } else if (linha.startsWith('- ') || linha.startsWith('* ')) {
-      doc.setFont('helvetica', 'normal')
+      doc.setFont(PDF_FONT, 'normal')
       doc.setFontSize(10)
-      writeWrapped(`• ${cleanMarkdown(linha.replace(/^[-*] /, ''))}`, margemEsq + 3, larguraTexto - 5, 5)
+      writeWrapped(`- ${cleanMarkdown(linha.replace(/^[-*] /, ''))}`, margemEsq + 3, larguraTexto - 5, 5)
     } else if (linha === '') {
       y += 3
     } else if (linha === '---') {
@@ -127,10 +237,21 @@ export async function exportarPDF(documento: DocumentoExport, empresa: EmpresaEx
       doc.line(margemEsq, y, 210 - margemDir, y)
       y += 4
     } else {
-      doc.setFont('helvetica', 'normal')
+      doc.setFont(PDF_FONT, 'normal')
       doc.setFontSize(10)
       writeWrapped(cleanMarkdown(linha), margemEsq, larguraTexto, 5)
     }
+  }
+
+  gerarPaginaAprovacao({
+    doc,
+    configuracao: config,
+    versoes: versoesAprovacao,
+  })
+
+  if (incluirSumario && entradasSumario.length) {
+    doc.setPage(2)
+    gerarSumario({ doc, entradas: entradasSumario, addPage: false, paginasReservadas: paginasSumarioReservadas })
   }
 
   drawFooters()
@@ -140,56 +261,77 @@ export async function exportarPDF(documento: DocumentoExport, empresa: EmpresaEx
   await registrarExportacao(documento, 'pdf', fileName, await hashBlob(blob), config)
 
   function drawHeader() {
-    doc.setFont('helvetica', 'bold')
+    doc.setFont(PDF_FONT, 'bold')
     doc.setFontSize(10)
     doc.text(config.nome || 'Consultoria', margemEsq, y)
-    doc.setFont('helvetica', 'normal')
-    doc.text(empresa.nome, 210 - margemDir, y, { align: 'right' })
+    doc.setFont(PDF_FONT, 'normal')
+    doc.text(empresa.nome, pageWidth() - margemDir, y, { align: 'right' })
     y += 5
     doc.setLineWidth(0.3)
-    doc.line(margemEsq, y, 210 - margemDir, y)
+    doc.line(margemEsq, y, pageWidth() - margemDir, y)
     drawVersionTable()
   }
 
   function drawVersionTable() {
     const tabelaY = 28
-    const colWidth = larguraTexto / 3
-    const codigo = getCodigoDocumento(documento)
+    const tableWidth = pageWidth() - margemEsq - margemDir
+    const codeWidth = Math.min(105, tableWidth * 0.58)
+    const revWidth = 34
+    const codigo = codigoDocumento
     const revisao = `Rev. ${String(Math.max((documento.versao || 1) - 1, 0)).padStart(2, '0')}`
 
     doc.setFontSize(8)
-    doc.setFont('helvetica', 'normal')
+    doc.setFont(PDF_FONT, 'normal')
     doc.setDrawColor(180)
-    doc.rect(margemEsq, tabelaY, larguraTexto, 12)
-    doc.line(margemEsq + colWidth, tabelaY, margemEsq + colWidth, tabelaY + 12)
-    doc.line(margemEsq + colWidth * 2, tabelaY, margemEsq + colWidth * 2, tabelaY + 12)
+    doc.rect(margemEsq, tabelaY, tableWidth, 12)
+    doc.line(margemEsq + codeWidth, tabelaY, margemEsq + codeWidth, tabelaY + 12)
+    doc.line(margemEsq + codeWidth + revWidth, tabelaY, margemEsq + codeWidth + revWidth, tabelaY + 12)
 
     doc.setFontSize(7)
     doc.setTextColor(100)
-    doc.text('CODIGO', margemEsq + 2, tabelaY + 3)
-    doc.text('REVISAO', margemEsq + colWidth + 2, tabelaY + 3)
-    doc.text('DATA', margemEsq + colWidth * 2 + 2, tabelaY + 3)
+    doc.text('CÓDIGO', margemEsq + 2, tabelaY + 3)
+    doc.text('REVISÃO', margemEsq + codeWidth + 2, tabelaY + 3)
+    doc.text('DATA', margemEsq + codeWidth + revWidth + 2, tabelaY + 3)
 
-    doc.setFontSize(9)
-    doc.setFont('helvetica', 'bold')
+    let codeFontSize = 9
+    doc.setFont(PDF_FONT, 'bold')
+    while (codeFontSize > 6 && doc.getTextWidth(codigo) > codeWidth - 4) {
+      codeFontSize -= 0.5
+      doc.setFontSize(codeFontSize)
+    }
     doc.setTextColor(0)
     doc.text(codigo, margemEsq + 2, tabelaY + 9)
-    doc.text(revisao, margemEsq + colWidth + 2, tabelaY + 9)
-    doc.text(new Date().toLocaleDateString('pt-BR'), margemEsq + colWidth * 2 + 2, tabelaY + 9)
+    doc.setFontSize(9)
+    doc.text(revisao, margemEsq + codeWidth + 2, tabelaY + 9)
+    doc.text(new Date().toLocaleDateString('pt-BR'), margemEsq + codeWidth + revWidth + 2, tabelaY + 9)
 
     y = tabelaY + 18
   }
 
-  function addPage() {
-    doc.addPage()
+  function addPage(orientation: 'portrait' | 'landscape' = 'portrait') {
+    doc.addPage('a4', orientation)
     y = 20
     drawHeader()
+  }
+
+  function capturarHeading(linha: string, nivel: 1 | 2 | 3) {
+    if (!incluirSumario) return
+
+    const titulo = cleanMarkdown(linha.replace(/^#{1,3}\s+/, '')).trim()
+    const estruturaAtual = estrutura[headingIndex]
+    headingIndex += 1
+
+    entradasSumario.push({
+      titulo: estruturaAtual?.titulo || titulo,
+      nivel: estruturaAtual?.nivel || nivel,
+      pagina: currentPage(),
+    })
   }
 
   function writeWrapped(texto: string, x: number, width: number, lineHeight: number) {
     const linhasQuebradas = doc.splitTextToSize(texto, width) as string[]
     for (const line of linhasQuebradas) {
-      if (y > 270) addPage()
+      if (y > pageHeight() - 27) addPage()
       doc.text(line, x, y)
       y += lineHeight
     }
@@ -200,31 +342,72 @@ export async function exportarPDF(documento: DocumentoExport, empresa: EmpresaEx
       .filter((line) => !/^\|[\s:-|]+\|$/.test(line))
       .map((line) => line.split('|').slice(1, -1).map((cell) => cleanMarkdown(cell.trim())))
 
-    if (!rows.length) return
+    if (!rows.length) return false
+    const columnCount = rows[0].length
+    const isWide = columnCount >= 5 || rows.some((row) => row.some((cell) => cell.length > 80))
+    const margin = isWide ? { left: 10, right: 10 } : { left: margemEsq, right: margemDir }
 
-    autoTable(doc, {
-      head: [rows[0]],
-      body: rows.slice(1),
-      startY: y,
-      margin: { left: margemEsq, right: margemDir },
-      styles: { font: 'helvetica', fontSize: 8, cellPadding: 2, overflow: 'linebreak' },
-      headStyles: { fillColor: [26, 86, 219], textColor: 255 },
-    })
+    if (isWide) {
+      addPage('landscape')
+    }
 
-    y = ((doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || y) + 6
+    const manterLinha = tabelaLargura === 'manter-linha'
+    const groups: string[][][] = columnCount > 6 && !manterLinha ? splitWideTable(rows) : [rows]
+
+    for (const groupRows of groups) {
+      autoTable(doc, {
+        head: [groupRows[0]],
+        body: groupRows.slice(1),
+        startY: y,
+        margin,
+        tableWidth: 'auto',
+        styles: {
+          font: PDF_FONT,
+          fontSize: manterLinha ? 5.7 : isWide ? 7 : 8,
+          cellPadding: manterLinha ? 1.2 : 2,
+          overflow: 'linebreak',
+          cellWidth: 'auto',
+          minCellWidth: manterLinha ? 10 : isWide ? 18 : 12,
+        },
+        headStyles: { fillColor: [26, 86, 219], textColor: 255 },
+        columnStyles: buildColumnStyles(groupRows[0], manterLinha),
+      })
+
+      y = ((doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || y) + 8
+      if (y > pageHeight() - 35 && groups.indexOf(groupRows) < groups.length - 1) {
+        addPage('landscape')
+      }
+    }
+
+    return isWide
   }
 
   function drawFooters() {
     const totalPaginas = doc.getNumberOfPages()
     for (let i = 1; i <= totalPaginas; i += 1) {
+      if (i === 1 || i === totalPaginas) continue
       doc.setPage(i)
-      doc.setFont('helvetica', 'normal')
+      doc.setFont(PDF_FONT, 'normal')
       doc.setFontSize(8)
       doc.setTextColor(120)
-      doc.text(`Pagina ${i} de ${totalPaginas}`, 105, 287, { align: 'center' })
-      doc.text('Documento confidencial - uso exclusivo do cliente', 105, 292, { align: 'center' })
+      const centerX = pageWidth() / 2
+      const footerY = pageHeight() - 10
+      doc.text(`Página ${i} de ${totalPaginas}`, centerX, footerY - 5, { align: 'center' })
+      doc.text('Documento confidencial - uso exclusivo do cliente', centerX, footerY, { align: 'center' })
       doc.setTextColor(0)
     }
+  }
+
+  function pageWidth() {
+    return doc.internal.pageSize.getWidth()
+  }
+
+  function pageHeight() {
+    return doc.internal.pageSize.getHeight()
+  }
+
+  function currentPage() {
+    return doc.getCurrentPageInfo().pageNumber
   }
 }
 
@@ -268,7 +451,7 @@ export async function exportarWord(documento: DocumentoExport, empresa: EmpresaE
           new Paragraph({ text: `Cliente: ${empresa.nome}` }),
           new Paragraph({ text: `Consultoria: ${config.nome}` }),
           new Paragraph({ text: `Data: ${new Date().toLocaleDateString('pt-BR')} - Versao ${documento.versao || 1}` }),
-          ...markdownToDocxParagraphs(documento.conteudo),
+          ...markdownToDocxParagraphs(limparConteudoParaExportacao(documento.conteudo)),
           new Paragraph({ text: 'Assinaturas', heading: HeadingLevel.HEADING_1 }),
           signatureTable(config, empresa),
         ],
@@ -385,22 +568,68 @@ function cleanMarkdown(value: string) {
 }
 
 function getCodigoDocumento(documento: DocumentoExport) {
-  const nome = normalizar(documento.nome)
-  const tipo = normalizar(documento.tipo)
-  const alvo = `${nome} ${tipo}`
+  return detectarCodigoDocumento(documento.nome, documento.tipo, documento.sequencial || 1)
+}
 
-  if (alvo.includes('politica ambiental')) return 'AMB-POL-001'
-  if (alvo.includes('politica') && (alvo.includes('sst') || alvo.includes('seguranca') || alvo.includes('saude'))) {
-    return 'SST-POL-001'
+function splitWideTable(rows: string[][]): string[][][] {
+  const header = rows[0]
+  const body = rows.slice(1)
+  const firstColumn = header[0]
+  const groups: string[][][] = []
+
+  for (let start = 1; start < header.length; start += 5) {
+    const indexes = [0, ...header.slice(start, start + 5).map((_, index) => start + index)]
+    groups.push([
+      indexes.map((index) => header[index]),
+      ...body.map((row) => indexes.map((index) => row[index] || '')),
+    ])
   }
-  if (alvo.includes('pcmso')) return 'SST-PCM-001'
-  if (alvo.includes('pgrs')) return 'AMB-PGR-001'
-  if (alvo.includes('pgr') || alvo.includes('programa de gerenciamento de riscos')) return 'SST-PGR-001'
-  if (alvo.includes('matriz') && alvo.includes('aspecto')) return 'AMB-MAT-001'
-  if (alvo.includes('inventario') && alvo.includes('risco')) return 'SST-INV-001'
-  if (alvo.includes('plano de emergencia') || alvo.includes('pae')) return 'SST-PAE-001'
 
-  return `DOC-${slugify(documento.nome).slice(0, 12).toUpperCase()}`
+  if (groups.length) return groups
+
+  return [[[firstColumn], ...body.map((row) => [row[0] || ''])]]
+}
+
+function buildColumnStyles(header: string[], manterLinha = false) {
+  const styles: Record<number, { cellWidth: number }> = {}
+  const normalized = header.map((item) => normalizar(item))
+
+  if (manterLinha) {
+    normalized.forEach((title, index) => {
+      if (title.includes('processo')) styles[index] = { cellWidth: 22 }
+      if (title.includes('atividade')) styles[index] = { cellWidth: 25 }
+      if (title.includes('aspecto')) styles[index] = { cellWidth: 34 }
+      if (title.includes('impacto')) styles[index] = { cellWidth: 43 }
+      if (title.includes('classificacao')) styles[index] = { cellWidth: 20 }
+      if (title.includes('condicao')) styles[index] = { cellWidth: 22 }
+      if (title.includes('significancia')) styles[index] = { cellWidth: 38 }
+      if (title.includes('controle')) styles[index] = { cellWidth: 38 }
+      if (title.includes('indicador')) styles[index] = { cellWidth: 30 }
+    })
+
+    return styles
+  }
+
+  normalized.forEach((title, index) => {
+    if (title.includes('codigo')) styles[index] = { cellWidth: 24 }
+    if (title.includes('norma') || title.includes('nome')) styles[index] = { cellWidth: 36 }
+    if (title.includes('descricao')) styles[index] = { cellWidth: 58 }
+    if (title.includes('orgao') || title.includes('tipo')) styles[index] = { cellWidth: 26 }
+    if (title.includes('setor') || title.includes('aplicabilidade')) styles[index] = { cellWidth: 38 }
+    if (title.includes('obrigatorio') || title.includes('status')) styles[index] = { cellWidth: 28 }
+    if (title.includes('evidencia')) styles[index] = { cellWidth: 48 }
+  })
+
+  return styles
+}
+
+function detectarTabelaLargura(documento: DocumentoExport): 'manter-linha' | 'pode-dividir' {
+  const slug = normalizar(`${documento.nome} ${documento.tipo}`)
+  if (slug.includes('matriz') && slug.includes('aspectos') && slug.includes('impactos')) {
+    return 'manter-linha'
+  }
+
+  return 'pode-dividir'
 }
 
 function normalizar(value: string) {

@@ -2,6 +2,7 @@ import { executarComRaciocinio } from '@/lib/agents/base/agenteCOT'
 import { gerarCodigoConduta } from '@/lib/agents/documentos/codigoConduta'
 import { gerarInventarioRiscos } from '@/lib/agents/documentos/inventarioRiscos'
 import { gerarMatrizAspectosImpactos } from '@/lib/agents/documentos/matrizAspectosImpactos'
+import { gerarMatrizRequisitosLegais } from '@/lib/agents/documentos/matrizRequisitosLegais'
 import { gerarMatrizTreinamentos } from '@/lib/agents/documentos/matrizTreinamentos'
 import { gerarPCMSO } from '@/lib/agents/documentos/pcmso'
 import { gerarPGR } from '@/lib/agents/documentos/pgr'
@@ -12,10 +13,15 @@ import { gerarPoliticaAmbiental } from '@/lib/agents/documentos/politicaAmbienta
 import { gerarPoliticaSST } from '@/lib/agents/documentos/politicaSST'
 import { gerarProcedimentoAPR } from '@/lib/agents/documentos/procedimentoAPR'
 import { gerarProcedimentoAuditoriaInterna } from '@/lib/agents/documentos/procedimentoAuditoriaInterna'
+import { gerarProcedimentoControleOperacionalAmbiental } from '@/lib/agents/documentos/procedimentoControleOperacionalAmbiental'
+import { detectarTipoAgente as detectarTipoAgenteDispatch } from '@/lib/agents/dispatch'
 import { CONSULTORIA_CONFIG } from '@/lib/config/consultoria'
 import { montarContextoCompleto } from '@/lib/contextoDocumental'
+import { limparMarkdownFence } from '@/lib/documentos/markdown'
 import { buscarPadroesSetor, normalizarSetor } from '@/lib/memoria'
 import { prisma } from '@/lib/prisma'
+
+export const detectarTipoAgente = detectarTipoAgenteDispatch
 
 type DocProjetoInput = {
   id?: string
@@ -57,7 +63,59 @@ export type DocumentoGerado = {
   }
 }
 
-function detectarTipoDocumento(nome: string) {
+const AGENTES_REGISTRADOS = {
+  politica_ambiental: true,
+  politica_sst: true,
+  matriz_aspectos_impactos: true,
+  matriz_aspectos: true,
+  matriz_requisitos_legais: true,
+  pgrs: true,
+  pgr: true,
+  pcmso: true,
+  plano_emergencia: true,
+  inventario_riscos: true,
+  apr: true,
+  matriz_treinamentos: true,
+  codigo_conduta_etica: true,
+  codigo_conduta: true,
+  politica_canal_denuncia: true,
+  procedimento_auditoria_interna: true,
+  auditoria_interna: true,
+  procedimento_controle_operacional_ambiental: true,
+  controle_operacional_ambiental: true,
+  procedimento: true,
+  plano_acao: true,
+} satisfies Record<string, true>
+
+const ALIASES_TIPO_DECLARADO: Record<string, keyof typeof AGENTES_REGISTRADOS> = {
+  matriz_aspectos_impactos: 'matriz_aspectos',
+  codigo_conduta_etica: 'codigo_conduta',
+  procedimento_auditoria_interna: 'auditoria_interna',
+  procedimento_controle_operacional_ambiental: 'controle_operacional_ambiental',
+}
+
+// Mantido apenas como referência temporária da lógica anterior de dispatch.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function detectarTipoAgenteLegado(nomeDocumento: string, tipoDeclarado?: string | null): string {
+  if (tipoDeclarado) {
+    const tipoNormalizado = normalizarTipoDeclarado(tipoDeclarado)
+    const alias = ALIASES_TIPO_DECLARADO[tipoNormalizado]
+
+    if (alias) return alias
+    if (tipoNormalizado in AGENTES_REGISTRADOS) return tipoNormalizado
+  }
+
+  const agenteDetectado = detectarPorNome(nomeDocumento)
+  if (process.env.NODE_ENV === 'development' && agenteDetectado === 'generico') {
+    console.warn(
+      `[DISPATCH WARN] Documento "${nomeDocumento}" caiu em "generico". Tipo declarado: "${tipoDeclarado || 'nao informado'}". Verifique mapeamento.`,
+    )
+  }
+
+  return agenteDetectado
+}
+
+function detectarPorNome(nome: string) {
   const n = normalizarNomeDocumento(nome)
 
   if (n.includes('politica ambiental')) return 'politica_ambiental'
@@ -67,6 +125,7 @@ function detectarTipoDocumento(nome: string) {
   if (n.includes('pgrs') || (n.includes('residuos') && n.includes('solidos')) || n.includes('gerenciamento de residuos')) return 'pgrs'
   if (n === 'pgr' || n.includes('programa de gerenciamento de riscos')) return 'pgr'
   if (n.includes('pcmso') || n.includes('controle medico')) return 'pcmso'
+  if (n.includes('matriz') && n.includes('requisito') && (n.includes('legal') || n.includes('legais'))) return 'matriz_requisitos_legais'
   if (n.includes('matriz') && n.includes('aspecto')) return 'matriz_aspectos'
   if (n.includes('inventario') && n.includes('risco')) return 'inventario_riscos'
   if (n.includes('apr') || n.includes('analise preliminar')) return 'apr'
@@ -76,10 +135,17 @@ function detectarTipoDocumento(nome: string) {
   if (n.includes('codigo') && n.includes('conduta')) return 'codigo_conduta'
   if (n.includes('canal') && n.includes('denuncia')) return 'politica_canal_denuncia'
   if (n.includes('auditoria') && n.includes('interna')) return 'auditoria_interna'
+  if (n.includes('controle') && n.includes('operacional') && n.includes('ambiental')) return 'controle_operacional_ambiental'
   if (n.includes('procedimento')) return 'procedimento'
   if (n.includes('plano de acao')) return 'plano_acao'
 
   return 'generico'
+}
+
+function normalizarTipoDeclarado(value: string) {
+  return normalizarNomeDocumento(value)
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
 }
 
 function normalizarNomeDocumento(value: string) {
@@ -105,6 +171,7 @@ function formatarContextoDocumental(contexto: Awaited<ReturnType<typeof montarCo
   return [
     `Qualidade do contexto: ${contexto.qualidadeContexto}%`,
     'Anamnese estruturada:',
+    `Processos principais declarados na anamnese: ${contexto.anamnese?.processosPrincipais || 'nao informado'}`,
     JSON.stringify(contexto.anamnese?.dadosSetor || {}, null, 2),
     '',
     'Arquivos processados e contexto extraido:',
@@ -191,8 +258,8 @@ export async function gerarDocumento(
   anamnese: AnamneseInput | null,
   perfilOperacional: unknown,
 ): Promise<DocumentoGerado> {
-  const tipo = detectarTipoDocumento(docProjeto.nome)
-  console.log(`[GERADOR] Documento: "${docProjeto.nome}" -> tipo: ${tipo}`)
+  const tipo = detectarTipoAgente(docProjeto.nome, docProjeto.tipo)
+  console.log(`[GERADOR] Documento: "${docProjeto.nome}" tipo declarado: "${docProjeto.tipo}" -> agente: ${tipo}`)
 
   const { contextoDocumental, contextoCompleto } = await montarContexto(
     docProjeto,
@@ -256,6 +323,10 @@ export async function gerarDocumento(
     return withGeradoEm(await gerarMatrizAspectosImpactos(contextoCompleto, docProjeto.id))
   }
 
+  if (tipo === 'matriz_requisitos_legais') {
+    return withGeradoEm(await gerarMatrizRequisitosLegais(contextoCompleto, docProjeto.id))
+  }
+
   if (tipo === 'inventario_riscos') {
     return withGeradoEm(await gerarInventarioRiscos(contextoCompleto, docProjeto.id))
   }
@@ -286,6 +357,10 @@ export async function gerarDocumento(
 
   if (tipo === 'auditoria_interna') {
     return withGeradoEm(await gerarProcedimentoAuditoriaInterna(contextoCompleto, docProjeto.id))
+  }
+
+  if (tipo === 'controle_operacional_ambiental') {
+    return withGeradoEm(await gerarProcedimentoControleOperacionalAmbiental(contextoCompleto, docProjeto.id))
   }
 
   return gerarDocumentoGenerico(docProjeto, empresa, contextoCompleto)
@@ -329,7 +404,7 @@ async function gerarDocumentoGenerico(
   )
 
   return {
-    conteudo: String(resultado),
+    conteudo: limparMarkdownFence(String(resultado)),
     metadados: {
       raciocinioIA: raciocinio,
       agente: 'genericoComCOT',
@@ -340,7 +415,7 @@ async function gerarDocumentoGenerico(
 
 function withGeradoEm(gerado: Omit<DocumentoGerado, 'metadados'> & { metadados: Record<string, unknown> }): DocumentoGerado {
   return {
-    conteudo: gerado.conteudo,
+    conteudo: limparMarkdownFence(gerado.conteudo),
     metadados: {
       ...gerado.metadados,
       geradoEm: new Date().toISOString(),

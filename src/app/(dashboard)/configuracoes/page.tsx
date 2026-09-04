@@ -12,10 +12,13 @@ export default async function ConfiguracoesPage() {
     (await prisma.configuracaoConsultoria.create({
       data: {
         nome: CONSULTORIA_CONFIG.nome,
+        nomeConsultoria: CONSULTORIA_CONFIG.nome,
         nomeCompleto: CONSULTORIA_CONFIG.nomeCompleto,
         slogan: CONSULTORIA_CONFIG.slogan,
         corPrimaria: CONSULTORIA_CONFIG.corPrimaria,
         corSecundaria: CONSULTORIA_CONFIG.corSecundaria,
+        responsavelTecnico: CONSULTORIA_CONFIG.responsavelTecnico,
+        registroResponsavel: CONSULTORIA_CONFIG.registroResponsavel,
       },
     }))
 
@@ -23,6 +26,7 @@ export default async function ConfiguracoesPage() {
     <ConfiguracoesClient
       initialConfig={{
         nome: config.nome,
+        nomeConsultoria: config.nomeConsultoria,
         nomeCompleto: config.nomeCompleto,
         slogan: config.slogan,
         corPrimaria: config.corPrimaria,
@@ -30,6 +34,8 @@ export default async function ConfiguracoesPage() {
         logoUrl: config.logoUrl,
         responsavelNome: config.responsavelNome,
         responsavelRegistro: config.responsavelRegistro,
+        responsavelTecnico: config.responsavelTecnico,
+        registroResponsavel: config.registroResponsavel,
         responsavelCargo: config.responsavelCargo,
         endereco: config.endereco,
         telefone: config.telefone,

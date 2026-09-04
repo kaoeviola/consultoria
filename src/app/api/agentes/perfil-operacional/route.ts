@@ -1,17 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
+import { jsonErrorResponse } from '@/lib/api-error'
 import { prisma } from '@/lib/prisma'
 
 type DadosSetor = {
   produtosQuimicos?: string | null
   residuosPerigosos?: string | null
   observacoesGerais?: string | null
-}
-
-type OpenAIError = {
-  message?: string
-  status?: number
-  type?: string
 }
 
 function normalizeDadosSetor(value: unknown): DadosSetor {
@@ -32,7 +27,7 @@ export async function POST(request: NextRequest) {
     console.log('OPENAI_API_KEY prefix:', process.env.OPENAI_API_KEY?.substring(0, 20))
 
     if (!projetoId) {
-      return NextResponse.json({ error: 'projetoId obrigatório' }, { status: 400 })
+      return NextResponse.json({ error: 'projetoId obrigatorio' }, { status: 400 })
     }
 
     const projeto = await prisma.projeto.findUnique({
@@ -41,29 +36,29 @@ export async function POST(request: NextRequest) {
     })
 
     if (!projeto) {
-      return NextResponse.json({ error: 'Projeto não encontrado' }, { status: 404 })
+      return NextResponse.json({ error: 'Projeto nao encontrado' }, { status: 404 })
     }
 
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
     const dadosSetor = normalizeDadosSetor(projeto.anamnese?.dadosSetor)
 
-    const prompt = `Você é especialista em SST e ISO 14001/45001. Analise e retorne APENAS JSON válido:
+    const prompt = `Voce e especialista em SST e ISO 14001/45001. Analise e retorne APENAS JSON valido:
 
 Empresa: ${projeto.empresa.nome}
 Setor: ${projeto.empresa.setor}
 CNAE: ${projeto.empresa.cnae}
-Funcionários: ${projeto.anamnese?.numFuncionarios}
+Funcionarios: ${projeto.anamnese?.numFuncionarios}
 Processos: ${projeto.anamnese?.processosPrincipais}
-Produtos químicos: ${dadosSetor.produtosQuimicos}
-Resíduos perigosos: ${dadosSetor.residuosPerigosos}
-Observações: ${dadosSetor.observacoesGerais}
+Produtos quimicos: ${dadosSetor.produtosQuimicos}
+Residuos perigosos: ${dadosSetor.residuosPerigosos}
+Observacoes: ${dadosSetor.observacoesGerais}
 
 Retorne JSON com: processos_provaveis, riscos_sst, aspectos_ambientais, documentos_esperados, legislacao_aplicavel, observacoes`
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
-        { role: 'system', content: 'Retorne APENAS JSON válido, sem markdown, sem explicações.' },
+        { role: 'system', content: 'Retorne APENAS JSON valido, sem markdown, sem explicacoes.' },
         { role: 'user', content: prompt },
       ],
       response_format: { type: 'json_object' },
@@ -79,19 +74,6 @@ Retorne JSON com: processos_provaveis, riscos_sst, aspectos_ambientais, document
 
     return NextResponse.json({ perfil })
   } catch (error: unknown) {
-    const openAIError = error as OpenAIError
-
-    console.error('=== ERRO PERFIL OPERACIONAL ===')
-    console.error('Message:', openAIError?.message)
-    console.error('Status:', openAIError?.status)
-    console.error('Full error:', JSON.stringify(error, null, 2))
-    return NextResponse.json(
-      {
-        error: openAIError?.message || 'Erro desconhecido',
-        status: openAIError?.status,
-        type: openAIError?.type,
-      },
-      { status: 500 },
-    )
+    return jsonErrorResponse(error, '[API ERROR] perfil-operacional')
   }
 }

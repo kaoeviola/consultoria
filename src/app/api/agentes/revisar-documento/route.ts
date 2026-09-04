@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { revisarDocumento } from '@/lib/agents/revisorTecnico'
+import { jsonErrorResponse } from '@/lib/api-error'
 import { prisma } from '@/lib/prisma'
 
 const requestSchema = z.object({
-  docProjetoId: z.string().trim().min(1, 'Documento é obrigatório'),
+  docProjetoId: z.string().trim().min(1, 'Documento e obrigatorio'),
 })
 
 export async function POST(request: Request) {
@@ -25,17 +26,11 @@ export async function POST(request: Request) {
     })
 
     if (!documento) {
-      return NextResponse.json(
-        { error: 'Documento não encontrado.' },
-        { status: 404 },
-      )
+      return NextResponse.json({ error: 'Documento nao encontrado.' }, { status: 404 })
     }
 
     if (!documento.conteudo) {
-      return NextResponse.json(
-        { error: 'Gere o documento antes de revisar.' },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: 'Gere o documento antes de revisar.' }, { status: 400 })
     }
 
     const revisao = await revisarDocumento(
@@ -53,15 +48,11 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        { error: 'Dados inválidos.', issues: error.issues },
+        { error: 'Dados invalidos.', issues: error.issues },
         { status: 400 },
       )
     }
 
-    console.error('Erro ao revisar documento:', error)
-    return NextResponse.json(
-      { error: 'Não foi possível revisar o documento.' },
-      { status: 500 },
-    )
+    return jsonErrorResponse(error, '[API ERROR] revisar-documento')
   }
 }

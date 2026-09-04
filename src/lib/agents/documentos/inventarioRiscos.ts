@@ -1,14 +1,21 @@
 import { executarComRaciocinio } from '@/lib/agents/base/agenteCOT'
+import { montarPromptBaseDoContexto } from '@/lib/agents/promptBase'
 
 export async function gerarInventarioRiscos(contexto: string, docProjetoId?: string) {
-  const systemPrompt =
-    'Você é especialista em SST, PGR, higiene ocupacional e NRs brasileiras. Gere inventário de riscos ocupacionais em markdown, específico e auditável.'
+  const systemPrompt = [
+    montarPromptBaseDoContexto('sst', contexto),
+    '',
+    '# INSTRUCOES ESPECIFICAS DESTE AGENTE',
+    '',
+    'Voce e especialista em SST, PGR, higiene ocupacional e NRs brasileiras.',
+    'Gere Inventario de Riscos Ocupacionais em markdown, especifico e auditavel.',
+    'Use apenas os processos declarados na anamnese como origem das atividades. Nao acrescente Caldeiraria, Tratamento Superficial, Logistica ou outros processos se nao estiverem declarados.',
+    'Para cada processo, identifique perigos, avalie riscos, classifique por GHE quando houver dados suficientes e indique medidas de controle pela hierarquia: eliminacao, substituicao, engenharia, administrativo e EPI.',
+    'Referencie NRs especificas por tipo de risco somente quando forem SST e aplicaveis ao processo declarado.',
+    'Use tabelas markdown e use "A definir" quando faltar funcao, cargo, medicao ou responsavel.',
+  ].join('\n')
   const userPrompt = [
-    'Gere um Inventário de Riscos Ocupacionais.',
-    'Considere funções/cargos quando disponíveis, atividades, processos, agentes da ontologia do setor e dados extraídos de PGR/PCMSO/arquivos.',
-    'Para cada função ou GHE, identifique perigos, avalie riscos, classifique por GHE, indique medidas de controle pela hierarquia: eliminação, substituição, engenharia, administrativo e EPI.',
-    'Referencie NRs específicas por tipo de risco.',
-    'Use tabelas markdown e destaque lacunas que precisam validação.',
+    'Gere um Inventario de Riscos Ocupacionais.',
     '',
     'Contexto completo:',
     contexto,
@@ -18,7 +25,7 @@ export async function gerarInventarioRiscos(contexto: string, docProjetoId?: str
     systemPrompt,
     userPrompt,
     undefined,
-    { docProjetoId, maxTokens: 4000 },
+    { docProjetoId, maxTokens: 4000, model: 'gpt-4o-mini', temperature: 0.3 },
   )
 
   return {

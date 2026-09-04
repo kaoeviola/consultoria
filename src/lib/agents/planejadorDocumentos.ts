@@ -4,7 +4,7 @@ import { openai } from '@/lib/openai'
 const documentoPlanejadoSchema = z.object({
   nome: z.string(),
   tipo: z.string(),
-  prioridade: z.number().int().min(1).max(5),
+  prioridade: z.coerce.number().int().min(1).max(5),
   motivo: z.string(),
   dependencias: z.array(z.string()),
   requisitosOrigem: z.array(z.string()).default([]),

@@ -6,6 +6,7 @@ import {
   getDocumentoInfo,
   getDocumentosRecomendadosPorSetor,
 } from '@/lib/ontologia/documentos'
+import { jsonErrorResponse } from '@/lib/api-error'
 import { getProjetoDashboard } from '@/lib/projeto-dashboard'
 import { prisma } from '@/lib/prisma'
 
@@ -107,11 +108,7 @@ export async function POST(request: Request) {
       )
     }
 
-    console.error('Erro ao planejar documentos:', error)
-    return NextResponse.json(
-      { error: 'Não foi possível planejar documentos.' },
-      { status: 500 },
-    )
+    return jsonErrorResponse(error, '[API ERROR] planejar-documentos')
   }
 }
 

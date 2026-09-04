@@ -52,7 +52,10 @@ export async function executarComRaciocinio<T>(
     messages: [
       {
         role: 'system',
-        content: systemPrompt,
+        content: [
+          systemPrompt,
+          'NUNCA envolva sua resposta em blocos de codigo markdown. Retorne markdown puro direto, sem markdown no inicio nem ``` no fim.',
+        ].join('\n\n'),
       },
       {
         role: 'user',

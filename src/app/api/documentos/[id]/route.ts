@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { salvarDocumentoAprovado } from '@/lib/memoria'
 import { prisma } from '@/lib/prisma'
@@ -8,6 +9,7 @@ const documentoUpdateSchema = z.object({
     .enum(['pendente', 'em_revisao', 'aprovado', 'exportado', 'entregue', 'aguardando_cliente'])
     .optional(),
   conteudo: z.string().optional().nullable(),
+  aprovadoOverrideJustificativa: z.string().trim().min(5).optional(),
 })
 
 export async function GET(
@@ -19,6 +21,18 @@ export async function GET(
   try {
     const documento = await prisma.docProjeto.findUnique({
       where: { id },
+      include: {
+        versoes: {
+          orderBy: { versao: 'asc' },
+          select: {
+            id: true,
+            versao: true,
+            createdAt: true,
+            alteracoes: true,
+            autor: true,
+          },
+        },
+      },
     })
 
     if (!documento) {
@@ -50,19 +64,39 @@ export async function PUT(
   try {
     const body = await request.json().catch(() => null)
     const data = documentoUpdateSchema.parse(body)
+    let metadadosAtuais: unknown = null
 
     if (data.status === 'aprovado') {
       const atual = await prisma.docProjeto.findUnique({
         where: { id },
-        select: { metadados: true },
+        select: {
+          metadados: true,
+          validacoesFidelidade: {
+            orderBy: { executadoEm: 'desc' },
+            take: 1,
+          },
+        },
       })
+      metadadosAtuais = atual?.metadados || null
       const validacao = getValidacaoAuditoria(atual?.metadados)
+      const validacaoFidelidade = atual?.validacoesFidelidade[0]
+      const temOverride = Boolean(data.aprovadoOverrideJustificativa)
 
-      if (validacao?.temProblemasCriticos) {
+      if (validacao?.temProblemasCriticos && !temOverride) {
         return NextResponse.json(
           {
             error: 'Documento possui problemas criticos de auditoria e nao pode ser aprovado.',
             validacaoAuditoria: validacao,
+          },
+          { status: 400 },
+        )
+      }
+
+      if (validacaoFidelidade?.bloqueia && !temOverride) {
+        return NextResponse.json(
+          {
+            error: 'Documento possui divergencias criticas de fidelidade e nao pode ser aprovado.',
+            validacaoFidelidade,
           },
           { status: 400 },
         )
@@ -74,6 +108,19 @@ export async function PUT(
       data: {
         ...(data.status ? { status: data.status } : {}),
         ...(data.conteudo !== undefined ? { conteudo: data.conteudo } : {}),
+        ...(data.aprovadoOverrideJustificativa
+          ? {
+              metadados: JSON.parse(JSON.stringify({
+                ...(metadadosAtuais && typeof metadadosAtuais === 'object' && !Array.isArray(metadadosAtuais)
+                  ? metadadosAtuais
+                  : {}),
+                aprovacaoOverride: {
+                  justificativa: data.aprovadoOverrideJustificativa,
+                  aprovadoEm: new Date().toISOString(),
+                },
+              })) as Prisma.InputJsonValue,
+            }
+          : {}),
         aprovadoPor: data.status === 'aprovado' ? 'humano' : undefined,
       },
       include: {

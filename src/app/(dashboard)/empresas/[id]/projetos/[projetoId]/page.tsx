@@ -55,6 +55,10 @@ export default async function ProjetoDetalhePage({
           versoes: {
             orderBy: { createdAt: 'desc' },
           },
+          validacoesFidelidade: {
+            orderBy: { executadoEm: 'desc' },
+            take: 5,
+          },
         },
         orderBy: {
           updatedAt: 'desc',
@@ -188,6 +192,25 @@ export default async function ProjetoDetalhePage({
         id: versao.id,
         versao: versao.versao,
         createdAt: versao.createdAt.toISOString(),
+      })),
+      validacoesFidelidade: documento.validacoesFidelidade.map((validacao) => ({
+        id: validacao.id,
+        versao: validacao.versao,
+        score: validacao.score,
+        divergencias: (Array.isArray(validacao.divergencias) ? validacao.divergencias : []) as Array<{
+          severidade: 'critica' | 'alta' | 'media' | 'info'
+          regra: string
+          esperado: string | string[]
+          encontrado: string | string[]
+          mensagem: string
+          localizacao?: string
+        }>,
+        criticas: validacao.criticas,
+        altas: validacao.altas,
+        medias: validacao.medias,
+        infos: validacao.infos,
+        bloqueia: validacao.bloqueia,
+        executadoEm: validacao.executadoEm.toISOString(),
       })),
     })),
     modelosDisponiveis: modelosDisponiveis.map((modelo) => ({

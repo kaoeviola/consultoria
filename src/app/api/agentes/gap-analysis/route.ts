@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { gerarGapAnalysis } from '@/lib/agents/gapAnalysis'
+import { jsonErrorResponse } from '@/lib/api-error'
 import { prisma } from '@/lib/prisma'
 
 const requestSchema = z.object({
-  avaliacaoId: z.string().trim().min(1, 'Avaliação é obrigatória'),
+  avaliacaoId: z.string().trim().min(1, 'Avaliacao e obrigatoria'),
 })
 
 export async function POST(request: Request) {
@@ -31,10 +32,7 @@ export async function POST(request: Request) {
     })
 
     if (!avaliacao) {
-      return NextResponse.json(
-        { error: 'Avaliação não encontrada.' },
-        { status: 404 },
-      )
+      return NextResponse.json({ error: 'Avaliacao nao encontrada.' }, { status: 404 })
     }
 
     if (!avaliacao.projeto.anamnese?.perfilOperacional) {
@@ -79,9 +77,7 @@ export async function POST(request: Request) {
     for (const sugestao of sugestoes) {
       const item = itemByRequisito.get(sugestao.requisitoId)
 
-      if (!item) {
-        continue
-      }
+      if (!item) continue
 
       await prisma.itemAvaliacao.update({
         where: { id: item.id },
@@ -97,15 +93,11 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        { error: 'Dados inválidos.', issues: error.issues },
+        { error: 'Dados invalidos.', issues: error.issues },
         { status: 400 },
       )
     }
 
-    console.error('Erro ao gerar gap analysis:', error)
-    return NextResponse.json(
-      { error: 'Não foi possível gerar o gap analysis.' },
-      { status: 500 },
-    )
+    return jsonErrorResponse(error, '[API ERROR] gap-analysis')
   }
 }

@@ -133,6 +133,25 @@ type DocumentoData = {
     exportadoPor: string | null
     createdAt: string
   }[]
+  validacoesFidelidade?: {
+    id?: string
+    versao: number
+    score: number
+    divergencias: {
+      severidade: 'critica' | 'alta' | 'media' | 'info'
+      regra: string
+      esperado: string | string[]
+      encontrado: string | string[]
+      mensagem: string
+      localizacao?: string
+    }[]
+    criticas?: number
+    altas?: number
+    medias?: number
+    infos?: number
+    bloqueia: boolean
+    executadoEm: string
+  }[]
 }
 
 type ProjetoData = {
